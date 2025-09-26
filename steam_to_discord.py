@@ -228,6 +228,22 @@ def main():
         start_keepalive()
         print(f"[keepalive] HTTP server on http://{KEEPALIVE_HOST}:{KEEPALIVE_PORT}/")
 
+    # 🔔 Send startup notification
+    startup_message = {
+        "name": "Bot",
+        "state": "startup",
+        "personastate": 1,
+        "in_game": False,
+        "game": None,
+        "avatar": "",
+        "profile_url": "",
+        "timestamp": int(time.time())
+    }
+    if BOT_MODE:
+        send_discord_bot(startup_message, "is now online ✅")
+    else:
+        send_discord_webhook(startup_message, "is now online ✅")
+
     state = load_last_status()
     print("Steam → Discord notifier running. Poll interval:", POLL_SECONDS, "seconds")
 
@@ -246,8 +262,8 @@ def main():
             print("[error] HTTP:", e)
         except Exception as e:
             print("[error]", e)
-        # Small jitter to avoid exact regular cadence
         time.sleep(POLL_SECONDS)
+
 
 if __name__ == "__main__":
     main()
