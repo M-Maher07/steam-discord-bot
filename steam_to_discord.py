@@ -257,21 +257,30 @@ def main():
     print("Steam → Discord notifier running. Poll interval:", POLL_SECONDS, "seconds")
 
     while not _shutdown:
-        try:
-            curr = fetch_steam_status()
-            notify, reason = should_notify(state, curr)
-            if notify:
-                if BOT_MODE:
-                    send_discord_bot(curr, reason)
-                else:
-                    send_discord_webhook(curr, reason)
-                state = curr
-                save_last_status(state)
-        except requests.HTTPError as e:
-            print("[error] HTTP:", e)
-        except Exception as e:
-            print("[error]", e)
-        time.sleep(POLL_SECONDS)
+    try:
+        curr = fetch_steam_status()
+
+        # 👇 add this so you can see each poll in Render → Logs (Live tail)
+        print(f"[poll] {time.strftime('%H:%M:%S')} state={curr['state']} "
+              f"in_game={curr['in_game']} game={curr.get('game')}")
+
+        notify, reason = should_notify(state, curr)
+        if notify:
+            # 👇 and this so you see when it fires a Discord message
+            print(f"[notify] {curr['name']} {reason} (game={curr.get('game')})")
+
+            if BOT_MODE:
+                send_discord_bot(curr, reason)
+            else:
+                send_discord_webhook(curr, reason)
+            state = curr
+            save_last_status(state)
+    except requests.HTTPError as e:
+        print("[error] HTTP:", e)
+    except Exception as e:
+        print("[error]", e)
+    time.sleep(POLL_SECONDS)
+
 
 
 if __name__ == "__main__":
