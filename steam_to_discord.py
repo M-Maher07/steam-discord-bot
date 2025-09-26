@@ -72,12 +72,21 @@ _shutdown = False  # for graceful exit
 # --------- Keep-alive HTTP server (no external deps) ----------
 class _OKHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        self._respond()
+
+    def do_HEAD(self):
+        self._respond(body=False)
+
+    def _respond(self, body=True):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"OK - Steam->Discord notifier is alive.")
+        if body:
+            self.wfile.write(b"OK - Steam->Discord notifier is alive.")
+
     def log_message(self, *args, **kwargs):
         return  # silence default logging
+
 
 def start_keepalive():
     def _run():
