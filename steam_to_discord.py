@@ -1,16 +1,16 @@
 """
-Steam → Discord Notifier (Python) — Replit friendly (single file)
+Steam → Discord Notifier (Python) — Replit/Render friendly (single file)
 
 What it does
 - Polls Steam Web API for a specific friend's status using their SteamID64.
 - When they transition to Online or start Playing a game, it pings you in a Discord channel.
 - Supports either a Discord Webhook (simple) or a proper Discord Bot (BOT_MODE=true).
 
-Replit & Keep-Alive
-- Set KEEPALIVE=true to run a tiny HTTP server (standard library) on port 3000.
-- Point UptimeRobot at your Replit web URL to keep the process awake.
+Keep-Alive
+- Set KEEPALIVE=true to run a tiny HTTP server (stdlib) on port $PORT (Render) or 3000 (default).
+- Point a monitor like UptimeRobot at your service URL to keep it awake (optional on Render).
 
-Environment (use .env locally or Replit Secrets)
+Environment variables
 BOT_MODE=true|false
 DISCORD_BOT_TOKEN=...         # required if BOT_MODE=true
 DISCORD_CHANNEL_ID=...        # required if BOT_MODE=true
@@ -19,9 +19,9 @@ DISCORD_USER_ID=...           # optional (your Discord ID to @mention)
 STEAM_API_KEY=...
 STEAM_FRIEND_ID64=...
 POLL_SECONDS=60
-KEEPALIVE=true                # optional (default true on Replit)
+KEEPALIVE=true
 ONLY_ONLINE=false             # optional: true = alert only when they come online (ignore games)
-ONLY_GAMES=                   # optional: comma-separated list of game names to alert on (case-insensitive)
+ONLY_GAMES=                   # optional: comma-separated game names (case-insensitive)
 """
 
 import json
@@ -29,12 +29,12 @@ import os
 import time
 import threading
 import signal
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
 
-# Optional .env support for local dev; Replit uses Secrets
+# Optional .env for local dev
 try:
     from dotenv import load_dotenv  # type: ignore
     load_dotenv()
@@ -48,18 +48,18 @@ STEAM_FRIEND_ID64 = os.getenv("STEAM_FRIEND_ID64", "").strip()
 # Webhook mode (simple) OR Bot mode (set BOT_MODE=true)
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
 DISCORD_USER_ID = os.getenv("DISCORD_USER_ID", "").strip()  # to @mention
-POLL_SECONDS = max(15, int(os.getenv("POLL_SECONDS", "60")))  # hard floor to be kind to APIs
+POLL_SECONDS = max(15, int(os.getenv("POLL_SECONDS", "60")))  # be kind to APIs
 
 BOT_MODE = os.getenv("BOT_MODE", "").lower() in {"1", "true", "yes"}
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "").strip()
 DISCORD_CHANNEL_ID = os.getenv("DISCORD_CHANNEL_ID", "").strip()
 
-# Replit keep-alive
+# Keep-alive HTTP
 KEEPALIVE = os.getenv("KEEPALIVE", "true").lower() in {"1", "true", "yes"}
-KEEPALIVE_PORT = int(os.getenv("PORT", "3000"))  # Replit expects 3000
+KEEPALIVE_PORT = int(os.getenv("PORT", "3000"))  # Render provides PORT; default 3000
 KEEPALIVE_HOST = "0.0.0.0"
 
-# Filtering options
+# Filters
 ONLY_ONLINE = os.getenv("ONLY_ONLINE", "false").lower() in {"1", "true", "yes"}
 ONLY_GAMES = [g.strip().lower() for g in os.getenv("ONLY_GAMES", "").split(",") if g.strip()]
 
@@ -67,9 +67,9 @@ STATUS_FILE = ".status.json"
 STEAM_SUMMARIES_URL = "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
 PERSONA_MAP = {0: "offline", 1: "online", 2: "busy", 3: "away", 4: "snooze", 5: "looking to trade", 6: "looking to play"}
 
-_shutdown = False  # for graceful exit
+_shutdown = False  # graceful exit flag
 
-# --------- Keep-alive HTTP server (no external deps) ----------
+# --------- Keep-alive HTTP server ----------
 class _OKHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self._respond()
@@ -77,7 +77,7 @@ class _OKHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         self._respond(body=False)
 
-    def _respond(self, body=True):
+    def _respond(self, body: bool = True):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
@@ -86,7 +86,6 @@ class _OKHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *args, **kwargs):
         return  # silence default logging
-
 
 def start_keepalive():
     def _run():
@@ -157,11 +156,9 @@ def should_notify(prev: Dict[str, Any], curr: Dict[str, Any]) -> Tuple[bool, str
 
     # 1) Offline → Online
     if prev_state == 0 and curr_state > 0:
-        if ONLY_GAMES:
-            # If you only care about certain games, you might not want generic "came online"
-            # Leave it enabled unless ONLY_ONLINE is true and ONLY_GAMES set.
-            if ONLY_ONLINE:
-                return False, ""
+        if ONLY_GAMES and ONLY_ONLINE:
+            # If ONLY_ONLINE=true and ONLY_GAMES set, suppress generic online messages
+            return False, ""
         return True, "came online"
 
     # 2) Started playing
@@ -171,7 +168,6 @@ def should_notify(prev: Dict[str, Any], curr: Dict[str, Any]) -> Tuple[bool, str
             if game_name and game_name not in ONLY_GAMES:
                 return False, ""
         if ONLY_ONLINE:
-            # ONLY_ONLINE=true means ignore game alerts
             return False, ""
         return True, "started playing"
 
@@ -224,6 +220,7 @@ def send_discord_bot(curr: Dict[str, Any], reason: str) -> None:
 def _handle_sigterm(signum, frame):
     global _shutdown
     _shutdown = True
+
 signal.signal(signal.SIGTERM, _handle_sigterm)
 signal.signal(signal.SIGINT, _handle_sigterm)
 
@@ -237,9 +234,9 @@ def main():
         start_keepalive()
         print(f"[keepalive] HTTP server on http://{KEEPALIVE_HOST}:{KEEPALIVE_PORT}/")
 
-    # 🔔 Send startup notification
+    # 🔔 Startup notification
     startup_message = {
-        "name": "Bot",
+        "name": "Notifier",
         "state": "startup",
         "personastate": 1,
         "in_game": False,
@@ -249,39 +246,37 @@ def main():
         "timestamp": int(time.time())
     }
     if BOT_MODE:
-        send_discord_bot(startup_message, "is now online ✅")
+        send_discord_bot(startup_message, "started up ✅")
     else:
-        send_discord_webhook(startup_message, "is now online ✅")
+        send_discord_webhook(startup_message, "started up ✅")
 
     state = load_last_status()
     print("Steam → Discord notifier running. Poll interval:", POLL_SECONDS, "seconds")
 
     while not _shutdown:
-    try:
-        curr = fetch_steam_status()
+        try:
+            curr = fetch_steam_status()
 
-        # 👇 add this so you can see each poll in Render → Logs (Live tail)
-        print(f"[poll] {time.strftime('%H:%M:%S')} state={curr['state']} "
-              f"in_game={curr['in_game']} game={curr.get('game')}")
+            # Heartbeat in logs
+            print(f"[poll] {time.strftime('%H:%M:%S')} — state={curr['state']}, "
+                  f"in_game={curr['in_game']}, game={curr.get('game')}")
 
-        notify, reason = should_notify(state, curr)
-        if notify:
-            # 👇 and this so you see when it fires a Discord message
-            print(f"[notify] {curr['name']} {reason} (game={curr.get('game')})")
+            notify, reason = should_notify(state, curr)
+            if notify:
+                print(f"[notify] {curr['name']} {reason} (game={curr.get('game')})")
+                if BOT_MODE:
+                    send_discord_bot(curr, reason)
+                else:
+                    send_discord_webhook(curr, reason)
+                state = curr
+                save_last_status(state)
 
-            if BOT_MODE:
-                send_discord_bot(curr, reason)
-            else:
-                send_discord_webhook(curr, reason)
-            state = curr
-            save_last_status(state)
-    except requests.HTTPError as e:
-        print("[error] HTTP:", e)
-    except Exception as e:
-        print("[error]", e)
-    time.sleep(POLL_SECONDS)
+        except requests.HTTPError as e:
+            print("[error] HTTP:", e)
+        except Exception as e:
+            print("[error]", e)
 
-
+        time.sleep(POLL_SECONDS)
 
 if __name__ == "__main__":
     main()
